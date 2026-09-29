@@ -57,6 +57,47 @@ class PlanAnalysis(StrictModel):
     uncertainties: list[str] = Field(default_factory=list)
 
 
+PLAN_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "observations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "field": {
+                        "type": "string",
+                        "enum": [
+                            "road_width_ft", "plot_width_ft", "plot_depth_ft",
+                            "front_setback_ft", "rear_setback_ft",
+                            "left_setback_ft", "right_setback_ft",
+                            "covered_area_sqft", "building_height_ft",
+                            "stair_width_ft", "parking_spaces"
+                        ]
+                    },
+                    "value": {"type": "number"},
+                    "unit": {"type": "string", "enum": ["ft", "sqft", "count"]},
+                    "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    "evidence": {"type": "string"},
+                    "box_2d": {
+                        "type": ["array", "null"],
+                        "items": {"type": "integer"},
+                        "minItems": 4,
+                        "maxItems": 4
+                    }
+                },
+                "required": ["field", "value", "unit", "confidence", "evidence", "box_2d"]
+            }
+        },
+        "uncertainties": {
+            "type": "array",
+            "items": {"type": "string"}
+        }
+    },
+    "required": ["observations", "uncertainties"]
+}
+
+
 def resolve_gemini_key(explicit_key: str | None = None) -> str | None:
     if explicit_key:
         return explicit_key.strip() or None
@@ -166,7 +207,7 @@ short statement to uncertainties instead.
             ],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=PlanAnalysis,
+                response_json_schema=PLAN_RESPONSE_SCHEMA,
                 temperature=0,
             ),
         )
