@@ -14,7 +14,14 @@ from src.rules import load_rule_pack
 
 
 ROOT = Path(__file__).parent
-RULE_FILE = ROOT / "data/rules/lda_5_marla_residential.yaml"
+RULE_FILES = {
+    "5_marla_residential": ROOT / "data/rules/lda_5_marla_residential.yaml",
+    "10_marla_residential": ROOT / "data/rules/lda_10_marla_residential.yaml",
+}
+PLOT_CLASS_LABELS = {
+    "5_marla_residential": "5 Marla Residential",
+    "10_marla_residential": "10 Marla Residential",
+}
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 ADVISORY = "NaqshaCheck provides an advisory pre-submission review. It does not issue official approval, replace a licensed architect or guarantee acceptance by any authority."
 AI_FIELDS = {
@@ -94,7 +101,10 @@ hr { border-color:rgba(255,255,255,.12)!important; }
 </style>
 """, unsafe_allow_html=True)
 
-metadata, rules = load_rule_pack(RULE_FILE)
+selected_plot_class = st.session_state.get("plot_class_select", "5_marla_residential")
+if selected_plot_class not in RULE_FILES:
+    selected_plot_class = "5_marla_residential"
+metadata, rules = load_rule_pack(RULE_FILES[selected_plot_class])
 gemini_key = get_gemini_key()
 
 with st.sidebar:
@@ -136,8 +146,15 @@ with project_tab:
     st.caption("Provide key information about your project. Compliance uses human-confirmed values only; AI candidates are never inserted silently.")
     left, right = st.columns(2)
     with left:
-        authority = st.selectbox("Authority *", ["LDA"], help="MVP supports one verified rule pack at a time.")
-        title = st.text_input("Project title (optional)", "5 Marla House")
+        authority = st.selectbox("Authority *", ["LDA"], help="MVP currently supports professionally reviewed LDA residential rule packs.")
+        plot_class = st.selectbox(
+            "Plot class *",
+            options=list(RULE_FILES),
+            format_func=lambda value: PLOT_CLASS_LABELS[value],
+            key="plot_class_select",
+            help="Select the professionally reviewed rule pack that applies to the project.",
+        )
+        title = st.text_input("Project title (optional)", f"{PLOT_CLASS_LABELS[plot_class]} House")
         location = st.text_input("Location / Sector (optional)", "Lahore")
         road_width = st.number_input("Road width (ft) *", 1.0, 300.0, 30.0, 1.0, key="road_width")
         plot_width = st.number_input("Plot width (ft)", 1.0, 500.0, 25.0, 0.5, key="plot_width")
@@ -151,9 +168,10 @@ with project_tab:
         height = st.number_input("Building height (ft)", 1.0, 500.0, 30.0, 0.5, key="height")
         stair_width = st.number_input("Clear stair width (ft)", 1.0, 20.0, 3.5, 0.25, key="stair_width")
         parking = st.number_input("Parking spaces", 0, 100, 1, 1, key="parking")
+        st.caption("Parking is recorded as project information but is not treated as a mandatory numeric violation in these reviewed ordinary residential rule packs.")
 
     st.session_state.project = ProjectInput(
-        authority=authority, plot_class="5_marla_residential", project_title=title,
+        authority=authority, plot_class=plot_class, project_title=title,
         location=location, road_width_ft=road_width, plot_width_ft=plot_width,
         plot_depth_ft=plot_depth, front_setback_ft=front, rear_setback_ft=rear,
         left_setback_ft=side_l, right_setback_ft=side_r, covered_area_sqft=covered_area,
@@ -241,7 +259,7 @@ with review_tab:
             c1.metric("Passed selected preflight checks", summary["pass"])
             c2.metric("Professional review required", summary["review"])
             c3.metric("Likely violations", summary["violation"])
-            st.caption(f"Rule pack version: {metadata['version']} · Status: {metadata.get('status', 'unknown')}")
+            st.caption(f"Rule pack version: {metadata['version']} · Status: {metadata.get('source_status', metadata.get('status', 'unknown'))}")
             for item in findings:
                 icon = "✅" if item.status == Status.PASS else "⚠️"
                 status_label = "Passed selected preflight check" if item.status == Status.PASS else "Likely violation"

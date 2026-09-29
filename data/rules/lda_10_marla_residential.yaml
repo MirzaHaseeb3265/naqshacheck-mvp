@@ -1,8 +1,8 @@
 metadata:
   authority: LDA
   jurisdiction: Lahore
-  plot_class: 5_marla_residential
-  display_name: 5 Marla Residential
+  plot_class: 10_marla_residential
+  display_name: 10 Marla Residential
   version: "LDA-2019-amended-2020-professional-review-2026-09"
   status: ARCHITECT_REVIEWED_ACTIVE
   source_status: ARCHITECT_REVIEWED_ACTIVE
@@ -10,41 +10,50 @@ metadata:
   source_document: "LDA Building and Zoning Regulations 2019 (with amendments approved till 28-01-2020)"
   reviewer: "Professionally reviewed and confirmed by project owner"
   notes:
+    - "For this preflight category, the side-space rule is evaluated as at least 5 ft on either the left or right side."
     - "The supplied draft-amendment document is not used as an active source."
     - "Parking is not encoded as a mandatory numeric check for this ordinary residential category because the reviewed source table lists parking as optional."
 rules:
-  - id: LDA-RES-5-FRONT-01
+  - id: LDA-RES-10-FRONT-01
     title: Front building line
     field: front_setback_ft
     operator: ">="
-    value: 5
+    value: 10
     unit: ft
     citation: "LDA Building & Zoning Regulations 2019, §2.2.1, PDF p.12"
-    message: "Increase the front building line/open space to at least 5 ft."
-  - id: LDA-RES-5-REAR-01
+    message: "Increase the front building line/open space to at least 10 ft."
+  - id: LDA-RES-10-REAR-01
     title: Rear open space
     field: rear_setback_ft
+    operator: ">="
+    value: 7
+    unit: ft
+    citation: "LDA Building & Zoning Regulations 2019, §2.2.1, PDF p.12"
+    message: "Increase the rear open space to at least 7 ft."
+  - id: LDA-RES-10-SIDE-01
+    title: Side open space on one side
+    field: max_side_setback_ft
     operator: ">="
     value: 5
     unit: ft
     citation: "LDA Building & Zoning Regulations 2019, §2.2.1, PDF p.12"
-    message: "Increase the rear open space to at least 5 ft."
-  - id: LDA-RES-5-COVER-01
+    message: "Provide at least 5 ft clear side open space on either the left or right side."
+  - id: LDA-RES-10-COVER-01
     title: Maximum ground coverage
     field: coverage_percent
     operator: "<="
-    value: 75
+    value: 70
     unit: "%"
     citation: "LDA Building & Zoning Regulations 2019, §2.2.3, PDF p.13"
-    message: "Reduce the ground-floor covered footprint so ground coverage does not exceed 75%."
-  - id: LDA-RES-5-HEIGHT-01
+    message: "Reduce the ground-floor covered footprint so ground coverage does not exceed 70%."
+  - id: LDA-RES-10-HEIGHT-01
     title: Maximum building height
     field: building_height_ft
     operator: "<="
-    value: 38
+    value: 45
     unit: ft
     citation: "LDA Building & Zoning Regulations 2019, §§2.2.2–2.2.3, PDF p.13"
-    message: "Reduce or professionally review the proposed building height; the selected preflight limit is 38 ft."
+    message: "Reduce or professionally review the proposed building height; the selected preflight limit is 45 ft."
   - id: LDA-RES-STAIR-01
     title: Minimum clear staircase width
     field: stair_width_ft

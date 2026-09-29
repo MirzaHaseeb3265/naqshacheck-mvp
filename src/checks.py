@@ -11,6 +11,8 @@ def _actual_value(project: ProjectInput, field: str):
         return round(project.coverage_percent, 2)
     if field == "plot_area_sqft":
         return round(project.plot_area_sqft, 2)
+    if field == "max_side_setback_ft":
+        return max(project.left_setback_ft, project.right_setback_ft)
     return getattr(project, field)
 
 

@@ -252,3 +252,14 @@ Gemini returns advisory measurement candidates, confidence, evidence and (when a
 normalized evidence boxes. Blue boxes in the UI indicate unconfirmed AI extraction candidates.
 They are not compliance findings. Only human-confirmed measurements are sent to the deterministic
 checker. Compliance status remains controlled by reviewed YAML rules and Python checks.
+
+## Professionally reviewed LDA residential rule packs
+
+The MVP now includes activated, professionally reviewed rule packs for the selected ordinary residential categories:
+
+- `data/rules/lda_5_marla_residential.yaml`
+- `data/rules/lda_10_marla_residential.yaml`
+
+Each active pack must contain `activation_allowed: true`. The loader rejects draft/unreviewed packs from deterministic checking. The supplied draft-amendment source is not activated. Parking remains project information but is not encoded as a mandatory numeric violation in these reviewed ordinary residential packs. For the 10-Marla pack, the reviewed side-space requirement is implemented as at least 5 ft on either the left or right side.
+
+NaqshaCheck remains an advisory pre-submission checker. Rule applicability and current authority requirements should continue to be reviewed when source regulations change.
