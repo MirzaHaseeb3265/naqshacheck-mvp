@@ -208,6 +208,11 @@ with upload_tab:
                     analysis = st.session_state.get("ai_plan_analysis")
                     if analysis:
                         st.subheader("AI measurement suggestions — confirmation required")
+                        if analysis.model_used:
+                            if analysis.fallback_used:
+                                st.success(f"Plan analyzed with fallback model `{analysis.model_used}` because the primary model was temporarily unavailable.")
+                            else:
+                                st.caption(f"Gemini model used: `{analysis.model_used}`")
                         st.warning("These are extraction suggestions, not verified measurements or compliance findings. Confirm or correct each value before use.")
                         if any(obs.box_2d for obs in analysis.observations):
                             st.image(
@@ -298,6 +303,11 @@ with review_tab:
                 explanation = st.session_state.get("ai_result_explanation")
                 if explanation:
                     st.subheader("Gemini explanation of deterministic findings")
+                    if explanation.model_used:
+                        if explanation.fallback_used:
+                            st.success(f"Explanation generated with fallback model `{explanation.model_used}`.")
+                        else:
+                            st.caption(f"Gemini model used: `{explanation.model_used}`")
                     st.caption("Advisory explanation only. The deterministic findings above remain authoritative within this application.")
                     st.write(explanation.summary)
                     for item in explanation.items:

@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from io import BytesIO
 import os
-from typing import Literal
+import time
+from typing import Literal, Callable, TypeVar
 
 from PIL import Image, ImageDraw
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -21,6 +22,7 @@ except ImportError:
 
 
 DEFAULT_GEMINI_VISION_MODEL = "gemini-3.8-flash"
+DEFAULT_GEMINI_FALLBACK_MODELS = ("gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash")
 MAX_IMAGE_EDGE = 1800
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
@@ -55,6 +57,8 @@ class PlanObservation(StrictModel):
 class PlanAnalysis(StrictModel):
     observations: list[PlanObservation] = Field(default_factory=list)
     uncertainties: list[str] = Field(default_factory=list)
+    model_used: str | None = None
+    fallback_used: bool = False
 
 
 PLAN_RESPONSE_SCHEMA = {
@@ -110,6 +114,53 @@ def gemini_is_configured(explicit_key: str | None = None) -> bool:
 
 def gemini_vision_model() -> str:
     return os.getenv("GEMINI_VISION_MODEL", DEFAULT_GEMINI_VISION_MODEL)
+
+
+def _candidate_models(primary: str | None = None) -> list[str]:
+    first = primary or gemini_vision_model()
+    configured = os.getenv("GEMINI_FALLBACK_MODELS", "")
+    fallbacks = [m.strip() for m in configured.split(",") if m.strip()] or list(DEFAULT_GEMINI_FALLBACK_MODELS)
+    return list(dict.fromkeys([first, *fallbacks]))
+
+
+def _status_code(error: Exception) -> int | None:
+    for attr in ("status_code", "code"):
+        value = getattr(error, attr, None)
+        if isinstance(value, int):
+            return value
+    text = str(error).upper()
+    for code in (408, 429, 500, 502, 503, 504):
+        if str(code) in text:
+            return code
+    return None
+
+
+def _is_transient(error: Exception) -> bool:
+    code = _status_code(error)
+    return code in {408, 429, 500, 502, 503, 504}
+
+
+T = TypeVar("T")
+
+def _call_with_fallback(call: Callable[[str], T], primary: str | None = None) -> tuple[T, str, bool]:
+    models = _candidate_models(primary)
+    errors: list[str] = []
+    for index, model_name in enumerate(models):
+        attempts = 2 if index == 0 else 1
+        for attempt in range(attempts):
+            try:
+                return call(model_name), model_name, index > 0
+            except Exception as error:
+                if not _is_transient(error):
+                    raise
+                errors.append(f"{model_name}: {_safe_error(error)}")
+                if attempt + 1 < attempts:
+                    time.sleep(1.5)
+        # Move immediately to the next model after the controlled retry.
+    raise GeminiServiceError(
+        "Gemini models are temporarily unavailable or rate-limited after a controlled retry and fallback attempts. "
+        "Deterministic checking remains available. Last responses: " + " | ".join(errors[-3:])
+    )
 
 
 def _prepare_image(image: Image.Image) -> tuple[bytes, str]:
@@ -199,22 +250,26 @@ short statement to uncertainties instead.
 
     try:
         client = genai.Client(api_key=key)
-        response = client.models.generate_content(
-            model=model or gemini_vision_model(),
-            contents=[
-                types.Part.from_bytes(data=image_bytes, mime_type=mime),
-                prompt,
-            ],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_json_schema=PLAN_RESPONSE_SCHEMA,
-                temperature=0,
-            ),
-        )
+
+        def request(model_name: str):
+            return client.models.generate_content(
+                model=model_name,
+                contents=[
+                    types.Part.from_bytes(data=image_bytes, mime_type=mime),
+                    prompt,
+                ],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_json_schema=PLAN_RESPONSE_SCHEMA,
+                ),
+            )
+
+        response, model_used, fallback_used = _call_with_fallback(request, model)
         raw = getattr(response, "text", None)
         if not raw:
             raise GeminiServiceError("Gemini returned an empty plan-analysis response.")
-        return PlanAnalysis.model_validate_json(raw)
+        parsed = PlanAnalysis.model_validate_json(raw)
+        return parsed.model_copy(update={"model_used": model_used, "fallback_used": fallback_used})
     except ValidationError as error:
         detail = str(error).replace("\n", " ")[:500]
         raise GeminiServiceError(
@@ -242,6 +297,8 @@ class FindingsExplanation(StrictModel):
     summary: str
     items: list[FindingExplanation] = Field(default_factory=list)
     disclaimer: str
+    model_used: str | None = None
+    fallback_used: bool = False
 
 
 EXPLANATION_RESPONSE_SCHEMA = {
@@ -309,18 +366,23 @@ DATA:
 
     try:
         client = genai.Client(api_key=key)
-        response = client.models.generate_content(
-            model=model or gemini_vision_model(),
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_json_schema=EXPLANATION_RESPONSE_SCHEMA,
-            ),
-        )
+
+        def request(model_name: str):
+            return client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_json_schema=EXPLANATION_RESPONSE_SCHEMA,
+                ),
+            )
+
+        response, model_used, fallback_used = _call_with_fallback(request, model)
         raw = getattr(response, "text", None)
         if not raw:
             raise GeminiServiceError("Gemini returned an empty findings explanation.")
-        return FindingsExplanation.model_validate_json(raw)
+        parsed = FindingsExplanation.model_validate_json(raw)
+        return parsed.model_copy(update={"model_used": model_used, "fallback_used": fallback_used})
     except ValidationError as error:
         detail = str(error).replace("\n", " ")[:500]
         raise GeminiServiceError(
