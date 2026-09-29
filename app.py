@@ -4,8 +4,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from src.ai_agent import AIServiceError, explain_findings, test_groq_connection
-from src.gemini_agent import GeminiServiceError, analyze_plan_image, draw_candidate_overlay, test_gemini_connection
+from src.gemini_agent import GeminiServiceError, analyze_plan_image, draw_candidate_overlay, explain_findings, test_gemini_connection
 from src.annotations import annotate_plan
 from src.checks import run_checks, summarize
 from src.models import ProjectInput, Status
@@ -32,15 +31,6 @@ AI_FIELDS = {
     "parking_spaces": ("Parking spaces", "parking"),
 }
 
-
-def get_groq_key() -> str | None:
-    key = os.getenv("GROQ_API_KEY")
-    if key:
-        return key
-    try:
-        return st.secrets.get("GROQ_API_KEY")
-    except Exception:
-        return None
 
 
 def get_gemini_key() -> str | None:
@@ -105,7 +95,6 @@ hr { border-color:rgba(255,255,255,.12)!important; }
 """, unsafe_allow_html=True)
 
 metadata, rules = load_rule_pack(RULE_FILE)
-groq_key = get_groq_key()
 gemini_key = get_gemini_key()
 
 with st.sidebar:
@@ -134,10 +123,6 @@ with st.sidebar:
     else:
         st.info("Plan AI off · add GEMINI_API_KEY in Streamlit Secrets")
 
-    if groq_key:
-        st.caption("Groq text explanations configured")
-    else:
-        st.caption("Groq text explanations optional")
 
 st.markdown('<div class="nc-topbar"><strong>NaqshaCheck</strong><span>Pre-submission review</span></div>', unsafe_allow_html=True)
 st.title("Building plan preflight")
@@ -266,37 +251,43 @@ with review_tab:
                     st.write(item.message)
                     st.caption(f"Rule {item.rule_id} · Version {metadata['version']} · Citation: {item.citation}")
 
-            if groq_key:
-                if st.button("Explain findings with AI", help="Explains deterministic results only; it cannot add or override rules."):
+            if gemini_key:
+                if st.button("Explain findings with Gemini", help="Explains deterministic results only; it cannot add or override rules."):
                     rules_by_id = {rule.id: rule for rule in rules}
-                    explanation_payload = {
-                        "confirmed_measurements": st.session_state.project.model_dump(),
-                        "rule_version": metadata["version"],
-                        "findings": [],
-                    }
+                    finding_payload = []
                     for finding in findings:
                         rule = rules_by_id[finding.rule_id]
-                        explanation_payload["findings"].append({
+                        finding_payload.append({
                             "rule_id": finding.rule_id,
-                            "status": "passed selected preflight check" if finding.status == Status.PASS else "likely violation",
+                            "title": finding.title,
+                            "status": "Passed selected preflight check" if finding.status == Status.PASS else "Likely violation",
                             "actual": finding.actual,
                             "required_operator": rule.operator,
                             "required_value": rule.value,
                             "unit": finding.unit,
                             "citation": finding.citation,
+                            "rule_version": metadata["version"],
                             "calculated_difference": round(float(finding.actual) - float(rule.value), 2),
                         })
                     try:
-                        st.session_state.ai_result_explanation = explain_findings(explanation_payload, api_key=groq_key)
-                    except AIServiceError as error:
+                        st.session_state.ai_result_explanation = explain_findings(
+                            st.session_state.project.model_dump(),
+                            finding_payload,
+                            api_key=gemini_key,
+                        )
+                    except GeminiServiceError as error:
                         st.error(str(error))
-                if "ai_result_explanation" in st.session_state:
-                    st.subheader("AI explanation of deterministic findings")
+                explanation = st.session_state.get("ai_result_explanation")
+                if explanation:
+                    st.subheader("Gemini explanation of deterministic findings")
                     st.caption("Advisory explanation only. The deterministic findings above remain authoritative within this application.")
-                    for item in st.session_state.ai_result_explanation.items:
+                    st.write(explanation.summary)
+                    for item in explanation.items:
                         st.write(f"**{item.priority.title()} · {item.rule_id}:** {item.explanation}")
                         st.write(f"Correction guidance: {item.correction_guidance}")
-                    st.caption(st.session_state.ai_result_explanation.disclaimer)
+                    st.caption(explanation.disclaimer)
+            else:
+                st.caption("Gemini explanation unavailable until GEMINI_API_KEY is configured.")
 
             report = create_report(st.session_state.project, findings, metadata["version"])
             st.download_button("Download PDF report", report, "naqshacheck-report.pdf", "application/pdf", use_container_width=True)

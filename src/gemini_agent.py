@@ -230,6 +230,111 @@ short statement to uncertainties instead.
         ) from error
 
 
+
+class FindingExplanation(StrictModel):
+    rule_id: str
+    priority: Literal["high", "medium", "low"]
+    explanation: str
+    correction_guidance: str
+
+
+class FindingsExplanation(StrictModel):
+    summary: str
+    items: list[FindingExplanation] = Field(default_factory=list)
+    disclaimer: str
+
+
+EXPLANATION_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "rule_id": {"type": "string"},
+                    "priority": {"type": "string", "enum": ["high", "medium", "low"]},
+                    "explanation": {"type": "string"},
+                    "correction_guidance": {"type": "string"}
+                },
+                "required": ["rule_id", "priority", "explanation", "correction_guidance"]
+            }
+        },
+        "disclaimer": {"type": "string"}
+    },
+    "required": ["summary", "items", "disclaimer"]
+}
+
+
+def explain_findings(
+    confirmed_project: dict,
+    findings: list[dict],
+    *,
+    api_key: str | None = None,
+    model: str | None = None,
+) -> FindingsExplanation:
+    """Explain deterministic findings without recalculating or overriding them."""
+    key = resolve_gemini_key(api_key)
+    if not key:
+        raise GeminiServiceError("Gemini is not configured. Add GEMINI_API_KEY to Streamlit Secrets.")
+    if genai is None or types is None:
+        raise GeminiServiceError("google-genai is not installed. Deterministic checking remains available.")
+
+    # Only deterministic/human-confirmed data is sent. No plan image is required here.
+    import json
+    payload = {
+        "confirmed_project_measurements": confirmed_project,
+        "deterministic_findings": findings,
+    }
+    prompt = """
+You explain results produced by NaqshaCheck's deterministic building-plan preflight engine.
+
+STRICT BOUNDARIES:
+- Do NOT decide, recalculate, reverse, upgrade, or downgrade any compliance status.
+- Do NOT invent rules, measurements, citations, exceptions, legal conclusions, or authority requirements.
+- Use ONLY the supplied human-confirmed measurements and deterministic findings.
+- Preserve rule IDs and citations exactly as supplied.
+- "Passed selected preflight check" means only that the selected deterministic check passed.
+- Use "Likely violation" for a supplied violation status.
+- Use "Needs information" or "Professional review required" only when supplied by the deterministic result.
+- Never say legally approved, government approved, fully compliant, or guaranteed acceptance.
+- correction_guidance must explain what the supplied finding indicates should be reviewed/corrected; do not redesign the building.
+- Keep explanations concise and practical.
+- The disclaimer must state that NaqshaCheck is an advisory pre-submission review and does not issue official approval, replace a licensed architect, or guarantee authority acceptance.
+
+Return only the requested structured JSON.
+DATA:
+""" + json.dumps(payload, ensure_ascii=False, default=str)
+
+    try:
+        client = genai.Client(api_key=key)
+        response = client.models.generate_content(
+            model=model or gemini_vision_model(),
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_json_schema=EXPLANATION_RESPONSE_SCHEMA,
+            ),
+        )
+        raw = getattr(response, "text", None)
+        if not raw:
+            raise GeminiServiceError("Gemini returned an empty findings explanation.")
+        return FindingsExplanation.model_validate_json(raw)
+    except ValidationError as error:
+        detail = str(error).replace("\n", " ")[:500]
+        raise GeminiServiceError(
+            f"Gemini returned an explanation that failed validation: {detail}. "
+            "Deterministic findings remain unchanged."
+        ) from error
+    except GeminiServiceError:
+        raise
+    except Exception as error:
+        raise GeminiServiceError(
+            f"Gemini explanation failed: {_safe_error(error)}. "
+            "Deterministic findings remain unchanged."
+        ) from error
+
 def draw_candidate_overlay(image: Image.Image, analysis: PlanAnalysis) -> Image.Image:
     """Draw blue evidence boxes for AI candidates; no compliance colors are assigned here."""
     overlay = image.convert("RGB").copy()

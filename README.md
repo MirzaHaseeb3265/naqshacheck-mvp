@@ -234,7 +234,7 @@ pytest -q
 ## Gemini vision setup
 
 NaqshaCheck uses Gemini for architectural-plan image extraction and keeps the deterministic
-rule engine authoritative. Groq remains optional for text explanations.
+rule engine authoritative. Gemini is also used for explanations of deterministic findings; Groq is no longer required by the MVP.
 
 1. Create a Gemini API key in Google AI Studio.
 2. In Streamlit Community Cloud, open **App settings → Secrets**.
@@ -244,9 +244,6 @@ rule engine authoritative. Groq remains optional for text explanations.
 GEMINI_API_KEY = "your-real-key"
 GEMINI_VISION_MODEL = "gemini-3.8-flash"
 
-# Optional: keep Groq for text explanations
-GROQ_API_KEY = "your-groq-key"
-GROQ_TEXT_MODEL = "openai/gpt-oss-20b"
 ```
 
 Never commit real API keys to GitHub.
