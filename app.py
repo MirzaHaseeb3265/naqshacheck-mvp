@@ -132,6 +132,18 @@ st.title("Building plan preflight")
 st.caption("Review project information, verify plan measurements and run selected preflight checks before authority submission.")
 st.markdown(f'<div class="nc-note"><b>Advisory pre-submission review.</b> {ADVISORY}</div>', unsafe_allow_html=True)
 
+# Apply AI-confirmed values BEFORE any measurement widgets are instantiated.
+# Streamlit does not allow changing a widget key after that widget has been created
+# during the same script run, so the Upload tab stores values as pending first.
+pending_ai_values = st.session_state.pop("pending_ai_measurements", None)
+if pending_ai_values:
+    for widget_key, value in pending_ai_values.items():
+        st.session_state[widget_key] = value
+    st.session_state.apply_notice = (
+        f"Applied {len(pending_ai_values)} confirmed measurement(s). "
+        "Review them in the Project tab, then run the compliance check."
+    )
+
 project_tab, upload_tab, review_tab = st.tabs(["1  Project", "2  Upload & AI review", "3  Compliance review"])
 
 with project_tab:
@@ -231,19 +243,24 @@ with upload_tab:
                                 st.write(f"- {uncertainty}")
                         if st.button("Apply confirmed candidates to measurement form", disabled=not confirmed):
                             applied = {}
+                            pending_widgets = {}
                             for field, value in confirmed.items():
                                 mapping = AI_FIELDS.get(field)
                                 if not mapping:
                                     continue
                                 widget_key = mapping[1]
                                 cast_value = int(value) if field == "parking_spaces" else float(value)
-                                st.session_state[widget_key] = cast_value
+                                pending_widgets[widget_key] = cast_value
                                 applied[field] = cast_value
+
+                            # Do NOT mutate widget-backed session_state here: the Project
+                            # widgets were already instantiated earlier in this script run.
+                            # Store values as pending, rerun, then apply them at the top of
+                            # the next run before those widgets exist.
+                            st.session_state.pending_ai_measurements = pending_widgets
                             st.session_state.ai_confirmed_measurements = applied
-                            # Existing findings are now stale because measurements changed.
                             st.session_state.pop("findings", None)
                             st.session_state.pop("ai_result_explanation", None)
-                            st.session_state.apply_notice = f"Applied {len(applied)} confirmed measurement(s). Open the Project tab to review them, then run the compliance check."
                             st.rerun()
 
                         if st.session_state.get("apply_notice"):
