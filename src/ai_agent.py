@@ -169,6 +169,47 @@ def _call_structured(
     raise AIServiceError("Groq AI assistance failed.") from last_error
 
 
+
+def test_groq_connection(*, api_key: str | None = None, vision_model_id: str | None = None) -> dict[str, Any]:
+    """Safely test Groq authentication and whether the configured vision model is listed.
+
+    Never returns or logs the API key. This diagnostic is independent of plan analysis.
+    """
+    key = resolve_api_key(api_key)
+    if not key:
+        return {"secret_detected": False, "key_format_ok": False, "authenticated": False, "vision_model_available": False, "vision_model": vision_model_id or vision_model(), "message": "GROQ_API_KEY was not detected."}
+    result = {
+        "secret_detected": True,
+        "key_format_ok": key.startswith("gsk_"),
+        "authenticated": False,
+        "vision_model_available": False,
+        "vision_model": vision_model_id or vision_model(),
+        "message": "",
+    }
+    if Groq is None:
+        result["message"] = "The Groq Python package is not installed."
+        return result
+    try:
+        response = _client(key, timeout_seconds=15.0).models.list()
+        model_ids = {getattr(item, "id", None) for item in getattr(response, "data", [])}
+        result["authenticated"] = True
+        result["vision_model_available"] = result["vision_model"] in model_ids
+        result["message"] = "Groq authentication succeeded."
+        return result
+    except RateLimitError:
+        result["message"] = "Groq accepted the request path but rate-limited it. Try again shortly."
+    except APITimeoutError:
+        result["message"] = "Groq connection test timed out."
+    except APIConnectionError:
+        result["message"] = "Could not connect to Groq from this Streamlit deployment."
+    except APIStatusError as error:
+        status = getattr(error, "status_code", "unknown")
+        result["message"] = f"Groq authentication test returned API status {status}."
+    except Exception:
+        result["message"] = "Groq connection test failed unexpectedly."
+    return result
+
+
 def prepare_image(image: Image.Image) -> tuple[bytes, str]:
     """Resize and compress a plan image before transmission."""
     prepared = image.convert("RGB")

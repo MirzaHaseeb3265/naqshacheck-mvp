@@ -4,7 +4,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from src.ai_agent import AIServiceError, analyze_plan_image, explain_findings
+from src.ai_agent import AIServiceError, analyze_plan_image, explain_findings, test_groq_connection
 from src.annotations import annotate_plan
 from src.checks import run_checks, summarize
 from src.models import ProjectInput, Status
@@ -107,7 +107,23 @@ with st.sidebar:
     st.divider()
     st.caption(f"{metadata['authority']} · {metadata['plot_class']} · Rule version {metadata['version']}")
     if groq_key:
-        st.success("AI assistance ready")
+        st.success("AI key detected")
+        with st.expander("AI connection diagnostic"):
+            st.caption("Tests authentication separately from plan analysis. Your API key is never displayed.")
+            if st.button("Test Groq connection", key="test_groq_connection"):
+                with st.spinner("Testing Groq authentication…"):
+                    st.session_state.groq_diagnostic = test_groq_connection(api_key=groq_key)
+            diag = st.session_state.get("groq_diagnostic")
+            if diag:
+                st.write("✓ Secret detected" if diag["secret_detected"] else "✗ Secret not detected")
+                st.write("✓ Key format looks valid" if diag["key_format_ok"] else "✗ Key does not start with gsk_")
+                st.write("✓ Groq authentication succeeded" if diag["authenticated"] else "✗ Groq authentication failed")
+                if diag["authenticated"]:
+                    if diag["vision_model_available"]:
+                        st.write(f"✓ Vision model available: `{diag['vision_model']}`")
+                    else:
+                        st.write(f"⚠ Configured vision model not listed: `{diag['vision_model']}`")
+                st.caption(diag["message"])
     else:
         st.info("AI assistance off · add GROQ_API_KEY in Streamlit Secrets")
 
