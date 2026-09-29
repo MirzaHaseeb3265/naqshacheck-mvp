@@ -230,7 +230,7 @@ def analyze_plan_image(image: Image.Image, *, api_key: str | None = None, model:
     data_url = f"data:{mime};base64,{base64.b64encode(image_bytes).decode('ascii')}"
     prompt = (
         "You are an extraction assistant for an advisory building-plan pre-submission tool. "
-        "Read ONLY information visibly present in this plan image. Do not infer hidden dimensions, legal compliance, "
+        "Read ONLY information visibly present in this plan image. Return the response ONLY as a valid JSON object. Do not wrap the JSON in markdown or code fences.\nDo not infer hidden dimensions, legal compliance, "
         "or authority requirements. Extract measurement candidates only when a label or dimension is visible. "
         "Use field names where applicable: road_width_ft, plot_width_ft, plot_depth_ft, front_setback_ft, "
         "rear_setback_ft, left_setback_ft, right_setback_ft, covered_area_sqft, building_height_ft, "
