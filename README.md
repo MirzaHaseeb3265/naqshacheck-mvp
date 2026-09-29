@@ -229,3 +229,29 @@ pytest -q
 - Add a measurement canvas / scale calibration workflow for reliable geometry.
 - Validate extraction and compliance performance against de-identified plans reviewed by licensed architects.
 - Complete privacy, liability, professional-indemnity, and authority-branding review.
+
+
+## Gemini vision setup
+
+NaqshaCheck uses Gemini for architectural-plan image extraction and keeps the deterministic
+rule engine authoritative. Groq remains optional for text explanations.
+
+1. Create a Gemini API key in Google AI Studio.
+2. In Streamlit Community Cloud, open **App settings → Secrets**.
+3. Add:
+
+```toml
+GEMINI_API_KEY = "your-real-key"
+GEMINI_VISION_MODEL = "gemini-3.8-flash"
+
+# Optional: keep Groq for text explanations
+GROQ_API_KEY = "your-groq-key"
+GROQ_TEXT_MODEL = "openai/gpt-oss-20b"
+```
+
+Never commit real API keys to GitHub.
+
+Gemini returns advisory measurement candidates, confidence, evidence and (when available)
+normalized evidence boxes. Blue boxes in the UI indicate unconfirmed AI extraction candidates.
+They are not compliance findings. Only human-confirmed measurements are sent to the deterministic
+checker. Compliance status remains controlled by reviewed YAML rules and Python checks.

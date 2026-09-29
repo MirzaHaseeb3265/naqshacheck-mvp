@@ -4,7 +4,8 @@ from pathlib import Path
 
 import streamlit as st
 
-from src.ai_agent import AIServiceError, analyze_plan_image, explain_findings, test_groq_connection
+from src.ai_agent import AIServiceError, explain_findings, test_groq_connection
+from src.gemini_agent import GeminiServiceError, analyze_plan_image, draw_candidate_overlay, test_gemini_connection
 from src.annotations import annotate_plan
 from src.checks import run_checks, summarize
 from src.models import ProjectInput, Status
@@ -38,6 +39,16 @@ def get_groq_key() -> str | None:
         return key
     try:
         return st.secrets.get("GROQ_API_KEY")
+    except Exception:
+        return None
+
+
+def get_gemini_key() -> str | None:
+    key = os.getenv("GEMINI_API_KEY")
+    if key:
+        return key
+    try:
+        return st.secrets.get("GEMINI_API_KEY")
     except Exception:
         return None
 
@@ -95,6 +106,7 @@ hr { border-color:rgba(255,255,255,.12)!important; }
 
 metadata, rules = load_rule_pack(RULE_FILE)
 groq_key = get_groq_key()
+gemini_key = get_gemini_key()
 
 with st.sidebar:
     st.markdown('<div class="nc-brand">NaqshaCheck</div><div class="nc-brand-sub">Pre-submission review</div>', unsafe_allow_html=True)
@@ -106,26 +118,26 @@ with st.sidebar:
     """, unsafe_allow_html=True)
     st.divider()
     st.caption(f"{metadata['authority']} · {metadata['plot_class']} · Rule version {metadata['version']}")
-    if groq_key:
-        st.success("AI key detected")
-        with st.expander("AI connection diagnostic"):
-            st.caption("Tests authentication separately from plan analysis. Your API key is never displayed.")
-            if st.button("Test Groq connection", key="test_groq_connection"):
-                with st.spinner("Testing Groq authentication…"):
-                    st.session_state.groq_diagnostic = test_groq_connection(api_key=groq_key)
-            diag = st.session_state.get("groq_diagnostic")
+    if gemini_key:
+        st.success("Gemini vision ready")
+        with st.expander("Gemini connection diagnostic"):
+            st.caption("Tests Gemini separately from plan analysis. Your API key is never displayed.")
+            if st.button("Test Gemini connection", key="test_gemini_connection"):
+                with st.spinner("Testing Gemini…"):
+                    st.session_state.gemini_diagnostic = test_gemini_connection(api_key=gemini_key)
+            diag = st.session_state.get("gemini_diagnostic")
             if diag:
                 st.write("✓ Secret detected" if diag["secret_detected"] else "✗ Secret not detected")
-                st.write("✓ Key format looks valid" if diag["key_format_ok"] else "✗ Key does not start with gsk_")
-                st.write("✓ Groq authentication succeeded" if diag["authenticated"] else "✗ Groq authentication failed")
-                if diag["authenticated"]:
-                    if diag["vision_model_available"]:
-                        st.write(f"✓ Vision model available: `{diag['vision_model']}`")
-                    else:
-                        st.write(f"⚠ Configured vision model not listed: `{diag['vision_model']}`")
+                st.write("✓ SDK available" if diag["sdk_available"] else "✗ google-genai not installed")
+                st.write("✓ Gemini request succeeded" if diag["authenticated"] else "✗ Gemini request failed")
                 st.caption(diag["message"])
     else:
-        st.info("AI assistance off · add GROQ_API_KEY in Streamlit Secrets")
+        st.info("Plan AI off · add GEMINI_API_KEY in Streamlit Secrets")
+
+    if groq_key:
+        st.caption("Groq text explanations configured")
+    else:
+        st.caption("Groq text explanations optional")
 
 st.markdown('<div class="nc-topbar"><strong>NaqshaCheck</strong><span>Pre-submission review</span></div>', unsafe_allow_html=True)
 st.title("Building plan preflight")
@@ -183,17 +195,23 @@ with upload_tab:
                 else:
                     st.caption("No reliable dimensions were found in the PDF text layer. Confirm measurements manually before checking.")
 
-                if groq_key:
-                    if st.button("Analyze visible plan labels with AI", help="Advisory extraction only; no compliance decision is made."):
+                if gemini_key:
+                    if st.button("Analyze visible plan labels with Gemini", help="Advisory extraction only; no compliance decision is made."):
                         with st.spinner("Reading visible labels and dimensions…"):
                             try:
-                                st.session_state.ai_plan_analysis = analyze_plan_image(image, api_key=groq_key)
-                            except AIServiceError as error:
+                                st.session_state.ai_plan_analysis = analyze_plan_image(image, api_key=gemini_key)
+                            except GeminiServiceError as error:
                                 st.error(str(error))
                     analysis = st.session_state.get("ai_plan_analysis")
                     if analysis:
                         st.subheader("AI measurement suggestions — confirmation required")
                         st.warning("These are extraction suggestions, not verified measurements or compliance findings. Confirm or correct each value before use.")
+                        if any(obs.box_2d for obs in analysis.observations):
+                            st.image(
+                                draw_candidate_overlay(image, analysis),
+                                caption="AI evidence locations (blue = unconfirmed Gemini extraction candidate)",
+                                use_container_width=True,
+                            )
                         confirmed: dict[str, float | int] = {}
                         for idx, obs in enumerate(analysis.observations):
                             label, _ = AI_FIELDS.get(obs.field, (obs.field, ""))
@@ -214,7 +232,7 @@ with upload_tab:
                             st.session_state.ai_confirmed_prefill = confirmed
                             st.rerun()
                 else:
-                    st.info("AI plan analysis is disabled until GROQ_API_KEY is configured. Manual deterministic checking remains available.")
+                    st.info("AI plan analysis is disabled until GEMINI_API_KEY is configured. Manual deterministic checking remains available.")
             except Exception as error:
                 st.error(f"The file could not be read: {error}")
     else:
