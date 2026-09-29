@@ -238,6 +238,9 @@ with upload_tab:
                                 st.write(f"- {uncertainty}")
                         if st.button("Apply confirmed candidates to measurement form", disabled=not confirmed):
                             st.session_state.ai_confirmed_prefill = confirmed
+                            # Persist exactly which Gemini fields the human confirmed.
+                            # Compliance overlays may colour only these fields.
+                            st.session_state.ai_confirmed_fields = list(confirmed.keys())
                             st.rerun()
                 else:
                     st.info("AI plan analysis is disabled until GEMINI_API_KEY is configured. Manual deterministic checking remains available.")
@@ -320,8 +323,18 @@ with review_tab:
             report = create_report(st.session_state.project, findings, metadata["version"])
             st.download_button("Download PDF report", report, "naqshacheck-report.pdf", "application/pdf", use_container_width=True)
             if "plan_image" in st.session_state:
-                annotated = annotate_plan(st.session_state.plan_image, findings)
+                annotated = annotate_plan(
+                    st.session_state.plan_image,
+                    findings,
+                    rules=rules,
+                    analysis=st.session_state.get("ai_plan_analysis"),
+                    confirmed_fields=st.session_state.get("ai_confirmed_fields", []),
+                )
                 buffer = BytesIO()
                 annotated.save(buffer, format="PNG")
-                st.image(annotated, caption="Annotated preflight preview", use_container_width=True)
+                st.image(
+                    annotated,
+                    caption="Compliance overlay: red = likely violation, green = passed selected check, orange = needs review, blue = unconfirmed AI candidate.",
+                    use_container_width=True,
+                )
                 st.download_button("Download annotated plan", buffer.getvalue(), "annotated-plan.png", "image/png", use_container_width=True)
