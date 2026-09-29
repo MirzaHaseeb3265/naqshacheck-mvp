@@ -5,7 +5,7 @@ from pathlib import Path
 import streamlit as st
 
 from src.gemini_agent import GeminiServiceError, analyze_plan_image, draw_candidate_overlay, explain_findings, test_gemini_connection
-from src.annotations import annotate_plan
+from src.annotations import annotate_plan, annotate_compliance_overlay
 from src.checks import run_checks, summarize
 from src.models import ProjectInput, Status
 from src.plan_reader import find_dimension_candidates, render_plan
@@ -49,13 +49,6 @@ def get_gemini_key() -> str | None:
     except Exception:
         return None
 
-
-# Apply explicitly confirmed AI candidates only before widgets are instantiated.
-for field, value in st.session_state.pop("ai_confirmed_prefill", {}).items():
-    mapping = AI_FIELDS.get(field)
-    if mapping:
-        widget_key = mapping[1]
-        st.session_state[widget_key] = int(value) if field == "parking_spaces" else float(value)
 
 st.set_page_config(page_title="NaqshaCheck", page_icon="📐", layout="wide", initial_sidebar_state="expanded")
 st.markdown("""
@@ -237,11 +230,24 @@ with upload_tab:
                             for uncertainty in analysis.uncertainties:
                                 st.write(f"- {uncertainty}")
                         if st.button("Apply confirmed candidates to measurement form", disabled=not confirmed):
-                            st.session_state.ai_confirmed_prefill = confirmed
-                            # Persist exactly which Gemini fields the human confirmed.
-                            # Compliance overlays may colour only these fields.
-                            st.session_state.ai_confirmed_fields = list(confirmed.keys())
+                            applied = {}
+                            for field, value in confirmed.items():
+                                mapping = AI_FIELDS.get(field)
+                                if not mapping:
+                                    continue
+                                widget_key = mapping[1]
+                                cast_value = int(value) if field == "parking_spaces" else float(value)
+                                st.session_state[widget_key] = cast_value
+                                applied[field] = cast_value
+                            st.session_state.ai_confirmed_measurements = applied
+                            # Existing findings are now stale because measurements changed.
+                            st.session_state.pop("findings", None)
+                            st.session_state.pop("ai_result_explanation", None)
+                            st.session_state.apply_notice = f"Applied {len(applied)} confirmed measurement(s). Open the Project tab to review them, then run the compliance check."
                             st.rerun()
+
+                        if st.session_state.get("apply_notice"):
+                            st.success(st.session_state.apply_notice)
                 else:
                     st.info("AI plan analysis is disabled until GEMINI_API_KEY is configured. Manual deterministic checking remains available.")
             except Exception as error:
@@ -323,18 +329,21 @@ with review_tab:
             report = create_report(st.session_state.project, findings, metadata["version"])
             st.download_button("Download PDF report", report, "naqshacheck-report.pdf", "application/pdf", use_container_width=True)
             if "plan_image" in st.session_state:
-                annotated = annotate_plan(
-                    st.session_state.plan_image,
-                    findings,
-                    rules=rules,
-                    analysis=st.session_state.get("ai_plan_analysis"),
-                    confirmed_fields=st.session_state.get("ai_confirmed_fields", []),
-                )
+                analysis = st.session_state.get("ai_plan_analysis")
+                confirmed_fields = set(st.session_state.get("ai_confirmed_measurements", {}).keys())
+                if analysis and confirmed_fields:
+                    annotated = annotate_compliance_overlay(
+                        st.session_state.plan_image,
+                        analysis,
+                        findings,
+                        rules,
+                        confirmed_fields,
+                    )
+                    overlay_caption = "Compliance overlay: red = likely violation, green = passed selected check, blue = detected but not confirmed."
+                else:
+                    annotated = annotate_plan(st.session_state.plan_image, findings)
+                    overlay_caption = "Annotated preflight preview. Confirm AI measurements to enable location-based compliance colors."
                 buffer = BytesIO()
                 annotated.save(buffer, format="PNG")
-                st.image(
-                    annotated,
-                    caption="Compliance overlay: red = likely violation, green = passed selected check, orange = needs review, blue = unconfirmed AI candidate.",
-                    use_container_width=True,
-                )
+                st.image(annotated, caption=overlay_caption, use_container_width=True)
                 st.download_button("Download annotated plan", buffer.getvalue(), "annotated-plan.png", "image/png", use_container_width=True)

@@ -1,157 +1,103 @@
-from __future__ import annotations
+from PIL import Image, ImageDraw
 
-from typing import Iterable, Any
-
-from PIL import Image, ImageDraw, ImageFont
-
-from .models import Finding, Status
+from .models import Finding, Rule, Status
 
 
-# Deterministic rule fields do not always have the same name as Gemini's visible
-# measurement fields. These aliases let us reuse Gemini only for location while
-# Python findings determine the compliance colour/status.
-FINDING_TO_OBSERVATION_FIELDS = {
-    "front_setback_ft": ("front_setback_ft",),
-    "rear_setback_ft": ("rear_setback_ft",),
-    "left_setback_ft": ("left_setback_ft",),
-    "right_setback_ft": ("right_setback_ft",),
-    "covered_area_sqft": ("covered_area_sqft",),
-    "coverage_percent": ("covered_area_sqft",),
-    "building_height_ft": ("building_height_ft",),
-    "stair_width_ft": ("stair_width_ft",),
-    "parking_spaces": ("parking_spaces",),
-    "road_width_ft": ("road_width_ft",),
-    "plot_width_ft": ("plot_width_ft",),
-    "plot_depth_ft": ("plot_depth_ft",),
-    # For the 10-Marla rule, 5 ft is required on at least one side. The finding
-    # is based on max(left, right), so either visible side measurement may be
-    # used as evidence; the deterministic engine still decides pass/fail.
-    "max_side_setback_ft": ("left_setback_ft", "right_setback_ft"),
-}
+def annotate_plan(image: Image.Image, findings: list[Finding]) -> Image.Image:
+    """Fallback summary banner when no AI evidence coordinates are available."""
+    canvas = image.copy().convert("RGB")
+    draw = ImageDraw.Draw(canvas, "RGBA")
+    violations = [item for item in findings if item.status == Status.VIOLATION]
+    if not violations:
+        draw.rectangle((0, 0, canvas.width, 70), fill=(11, 143, 85, 225))
+        draw.text((20, 22), "Passed selected preflight checks — advisory only", fill="white")
+        return canvas
 
-STATUS_STYLE = {
-    Status.PASS: ((7, 148, 85), "PASSED"),
-    Status.REVIEW: ((245, 158, 11), "NEEDS REVIEW"),
-    Status.VIOLATION: ((220, 38, 38), "LIKELY VIOLATION"),
-}
-BLUE = (30, 100, 220)
+    banner_height = min(55 + 30 * len(violations), max(110, canvas.height // 3))
+    draw.rectangle((0, 0, canvas.width, banner_height), fill=(154, 36, 36, 225))
+    draw.text((20, 15), "LIKELY VIOLATIONS — ARCHITECT REVIEW REQUIRED", fill="white")
+    y = 48
+    for item in violations[:6]:
+        line = f"• {item.title}: {item.actual} {item.unit}; required {item.required} {item.unit}"
+        draw.text((25, y), line, fill="white")
+        y += 28
+    return canvas
 
 
-def _font(size: int, bold: bool = False):
-    candidates = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
-    ]
-    for path in candidates:
-        try:
-            return ImageFont.truetype(path, size=size)
-        except OSError:
-            pass
-    return ImageFont.load_default()
+def _observation_fields_for_rule(rule: Rule) -> list[str]:
+    # Deterministic derived fields map back to the raw measurement(s) Gemini can locate.
+    if rule.field == "coverage_percent":
+        return ["covered_area_sqft"]
+    if rule.field == "max_side_setback_ft":
+        return ["left_setback_ft", "right_setback_ft"]
+    return [rule.field]
 
 
-def _observation_box(obs: Any, width: int, height: int):
-    box = getattr(obs, "box_2d", None)
-    if not box or len(box) != 4:
-        return None
+def _box_to_pixels(box: list[int], width: int, height: int) -> tuple[int, int, int, int]:
     ymin, xmin, ymax, xmax = [max(0, min(1000, int(v))) for v in box]
-    if ymax <= ymin or xmax <= xmin:
-        return None
     return (
-        int(xmin / 1000 * width), int(ymin / 1000 * height),
-        int(xmax / 1000 * width), int(ymax / 1000 * height),
+        int(xmin / 1000 * width),
+        int(ymin / 1000 * height),
+        int(xmax / 1000 * width),
+        int(ymax / 1000 * height),
     )
 
 
-def _draw_tag(draw: ImageDraw.ImageDraw, box, text: str, color, image_size):
-    x1, y1, x2, y2 = box
-    width, height = image_size
-    line_width = max(3, width // 300)
-    draw.rectangle(box, outline=color, width=line_width)
-
-    font = _font(max(12, min(22, width // 55)), bold=True)
-    pad = max(4, width // 350)
-    # Keep labels short enough to remain useful on phone-sized previews.
-    text = text[:90]
-    bbox = draw.textbbox((0, 0), text, font=font)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    tx = min(max(0, x1), max(0, width - tw - 2 * pad))
-    ty = y1 - th - 2 * pad
-    if ty < 0:
-        ty = min(height - th - 2 * pad, y2 + 2)
-    draw.rectangle((tx, ty, tx + tw + 2 * pad, ty + th + 2 * pad), fill=(*color, 225))
-    draw.text((tx + pad, ty + pad), text, fill="white", font=font)
-
-
-def annotate_plan(
+def annotate_compliance_overlay(
     image: Image.Image,
+    analysis,
     findings: list[Finding],
-    *,
-    rules: Iterable[Any] | None = None,
-    analysis: Any | None = None,
-    confirmed_fields: Iterable[str] | None = None,
+    rules: list[Rule],
+    confirmed_fields: set[str],
 ) -> Image.Image:
-    """Create an advisory compliance overlay.
+    """Color Gemini evidence locations using deterministic compliance findings.
 
-    Gemini observations supply only approximate evidence locations. Colours and
-    labels come exclusively from deterministic findings. Unconfirmed AI boxes
-    remain blue and are never presented as compliance results.
+    Gemini supplies only the approximate evidence box. Status/color comes solely from
+    the deterministic finding. Unconfirmed detections remain blue.
     """
     canvas = image.copy().convert("RGB")
     draw = ImageDraw.Draw(canvas, "RGBA")
-    width, height = canvas.size
+    rule_by_id = {r.id: r for r in rules}
 
-    violations = [item for item in findings if item.status == Status.VIOLATION]
-    banner_color = (154, 36, 36) if violations else (7, 148, 85)
-    banner_text = (
-        "LIKELY VIOLATIONS — ARCHITECT REVIEW REQUIRED"
-        if violations else
-        "PASSED SELECTED PREFLIGHT CHECKS — ADVISORY ONLY"
-    )
-    banner_h = max(44, min(72, height // 10))
-    draw.rectangle((0, 0, width, banner_h), fill=(*banner_color, 225))
-    draw.text((14, max(8, banner_h // 4)), banner_text, fill="white", font=_font(max(13, width // 48), True))
-
-    if analysis is None:
-        # Backward-compatible summary if no Gemini location data exists.
-        y = banner_h + 10
-        font = _font(max(12, width // 60))
-        for item in violations[:6]:
-            draw.text((18, y), f"• {item.title}: {item.actual} {item.unit}; required {item.required} {item.unit}", fill=(154, 36, 36), font=font)
-            y += max(20, width // 35)
-        return canvas
-
-    observations = list(getattr(analysis, "observations", []) or [])
-    confirmed = set(confirmed_fields or [])
-    rules_by_id = {getattr(rule, "id", None): rule for rule in (rules or [])}
-
-    # Build field -> deterministic finding. Rule.field is the authoritative link.
-    finding_by_obs_field: dict[str, Finding] = {}
+    # Map raw plan fields to deterministic findings.
+    field_findings: dict[str, Finding] = {}
     for finding in findings:
-        rule = rules_by_id.get(finding.rule_id)
-        if rule is None:
+        rule = rule_by_id.get(finding.rule_id)
+        if not rule:
             continue
-        for obs_field in FINDING_TO_OBSERVATION_FIELDS.get(getattr(rule, "field", ""), (getattr(rule, "field", ""),)):
-            if obs_field:
-                finding_by_obs_field[obs_field] = finding
+        for field in _observation_fields_for_rule(rule):
+            field_findings[field] = finding
 
-    for obs in observations:
-        box = _observation_box(obs, width, height)
-        if box is None:
+    for obs in analysis.observations:
+        if not getattr(obs, "box_2d", None) or len(obs.box_2d) != 4:
             continue
-        field = getattr(obs, "field", "")
-        finding = finding_by_obs_field.get(field)
+        box = _box_to_pixels(obs.box_2d, canvas.width, canvas.height)
+        finding = field_findings.get(obs.field)
 
-        # A compliance colour is allowed only when the user explicitly confirmed
-        # that AI field. Everything else stays an AI candidate in blue.
-        if finding is None or field not in confirmed:
-            _draw_tag(draw, box, f"AI candidate: {field}", BLUE, (width, height))
-            continue
+        if obs.field not in confirmed_fields or finding is None:
+            outline = (37, 99, 235, 255)  # blue: AI candidate / no deterministic mapping
+            fill = (37, 99, 235, 35)
+            label = f"AI CANDIDATE: {obs.field}"
+        elif finding.status == Status.VIOLATION:
+            outline = (220, 38, 38, 255)
+            fill = (220, 38, 38, 45)
+            label = f"LIKELY VIOLATION: {finding.title} | {finding.actual} {finding.unit} | required {finding.required} {finding.unit}"
+        elif finding.status == Status.PASS:
+            outline = (5, 150, 105, 255)
+            fill = (5, 150, 105, 38)
+            label = f"PASSED CHECK: {finding.title} | {finding.actual} {finding.unit}"
+        else:
+            outline = (245, 158, 11, 255)
+            fill = (245, 158, 11, 40)
+            label = f"NEEDS REVIEW: {finding.title}"
 
-        color, status_text = STATUS_STYLE[finding.status]
-        actual = finding.actual
-        unit = finding.unit
-        label = f"{status_text}: {finding.title} | {actual} {unit} | required {finding.required} {unit}"
-        _draw_tag(draw, box, label, color, (width, height))
+        # Make the compliance location unmistakable.
+        draw.rectangle(box, outline=outline, width=max(3, canvas.width // 250), fill=fill)
+        x1, y1, x2, _ = box
+        text_y = max(0, y1 - 26)
+        # Approximate label background width; clamp to canvas.
+        text_w = min(canvas.width - x1, max(180, min(canvas.width, 8 * len(label) + 18)))
+        draw.rectangle((x1, text_y, x1 + text_w, text_y + 24), fill=outline)
+        draw.text((x1 + 5, text_y + 5), label, fill="white")
 
     return canvas
