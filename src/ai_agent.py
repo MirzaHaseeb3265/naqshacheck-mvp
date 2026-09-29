@@ -245,10 +245,46 @@ def analyze_plan_image(image: Image.Image, *, api_key: str | None = None, model:
             {"type": "image_url", "image_url": {"url": data_url}},
         ]}]
 
-    return _call_structured(
-        client=_client(api_key), model=model or vision_model(), messages_factory=messages,
-        schema=PlanAnalysis, schema_name="plan_analysis", max_tokens=1800, reasoning_effort="none",
-    )
+    client = _client(api_key)
+    last_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            completion = client.chat.completions.create(
+                model=model or vision_model(),
+                messages=messages(attempt == 1),
+                response_format={"type": "json_object"},
+                reasoning_effort="none",
+                temperature=0,
+                max_completion_tokens=1800,
+            )
+            return _parse_content(completion.choices[0].message.content, PlanAnalysis)
+        except (json.JSONDecodeError, ValidationError, ValueError) as error:
+            last_error = error
+            if attempt == 0:
+                continue
+            raise AIServiceError("Groq returned malformed plan-extraction JSON after one retry.") from error
+        except RateLimitError as error:
+            raise AIServiceError("Groq rate limit reached. Please wait briefly and try again.") from error
+        except APITimeoutError as error:
+            raise AIServiceError("Groq timed out while analyzing the plan. Deterministic checking remains available.") from error
+        except APIConnectionError as error:
+            raise AIServiceError("Could not connect to Groq. Deterministic checking remains available.") from error
+        except APIStatusError as error:
+            status = getattr(error, "status_code", "unknown")
+            detail = ""
+            body = getattr(error, "body", None)
+            if isinstance(body, dict):
+                err = body.get("error", body)
+                if isinstance(err, dict):
+                    detail = str(err.get("message", ""))
+            safe_detail = detail[:350].replace("\n", " ") if detail else "No additional error detail was returned."
+            raise AIServiceError(
+                f"Groq vision request returned API status {status}: {safe_detail} "
+                "Deterministic checking remains available."
+            ) from error
+        except Exception as error:
+            raise AIServiceError("Groq plan analysis failed. Deterministic checking remains available.") from error
+    raise AIServiceError("Groq plan analysis failed.") from last_error
 
 
 def extract_candidate_rules(
