@@ -1,0 +1,2 @@
+"""NaqshaCheck application package."""
+

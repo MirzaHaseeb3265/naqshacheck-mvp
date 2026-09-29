@@ -1,0 +1,58 @@
+metadata:
+  authority: LDA
+  jurisdiction: Lahore
+  plot_class: 5_marla_residential
+  version: "demo-2026-09"
+  status: DEMO_NOT_LEGAL_SOURCE
+  source_url: "Replace with the official, current LDA regulation URL"
+  reviewer: "Pending licensed architect review"
+rules:
+  - id: DEMO-FRONT-01
+    title: Front setback
+    field: front_setback_ft
+    operator: ">="
+    value: 5
+    unit: ft
+    citation: "Demo rule — replace with verified clause"
+    message: "Increase the front open space to the verified minimum."
+  - id: DEMO-REAR-01
+    title: Rear setback
+    field: rear_setback_ft
+    operator: ">="
+    value: 5
+    unit: ft
+    citation: "Demo rule — replace with verified clause"
+    message: "Increase the rear open space to the verified minimum."
+  - id: DEMO-COVER-01
+    title: Plot coverage
+    field: coverage_percent
+    operator: "<="
+    value: 75
+    unit: "%"
+    citation: "Demo rule — replace with verified clause"
+    message: "Reduce the covered footprint to the verified coverage limit."
+  - id: DEMO-HEIGHT-01
+    title: Building height
+    field: building_height_ft
+    operator: "<="
+    value: 38
+    unit: ft
+    citation: "Demo rule — replace with verified clause"
+    message: "Reduce or professionally review the proposed building height."
+  - id: DEMO-STAIR-01
+    title: Stair width
+    field: stair_width_ft
+    operator: ">="
+    value: 3.5
+    unit: ft
+    citation: "Demo rule — replace with verified clause"
+    message: "Increase the clear staircase width."
+  - id: DEMO-PARK-01
+    title: Parking provision
+    field: parking_spaces
+    operator: ">="
+    value: 1
+    unit: space
+    citation: "Demo rule — replace with verified clause"
+    message: "Provide the verified minimum on-site parking."
+

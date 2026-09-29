@@ -1,0 +1,8 @@
+streamlit==1.50.0
+pydantic==2.11.9
+PyYAML==6.0.2
+PyMuPDF==1.26.4
+Pillow==11.3.0
+reportlab==4.4.4
+groq==1.7.0
+pytest==8.4.2
